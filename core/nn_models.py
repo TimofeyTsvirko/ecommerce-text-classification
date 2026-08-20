@@ -4,13 +4,24 @@ import torch.nn as nn
 from transformers import AutoModel
 
 
-class RNNForHallucinationDetection(nn.Module):
-    def __init__(self, vocab_size: int, embedding_dim: int, rnn_units: int, dropout_rate: float,
-                 recurrent_dropout_rate: float, max_sequence_length: int, pad_token_id: int = 0, *args, **kwargs):
+class RNNForCategoryClassification(nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        embedding_dim: int,
+        rnn_units: int,
+        dropout_rate: float,
+        max_sequence_length: int,
+        recurrent_dropout_rate: float = 0.0,
+        pad_token_id: int = 0,
+        num_classes: int = 4,
+        *args, **kwargs
+    ):
         super().__init__(*args, **kwargs)
 
-        self.embedding = nn.Embedding(vocab_size, embedding_dim)
+        self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=pad_token_id)
         self.dropout = nn.Dropout(dropout_rate)
+        
         self.rnn = nn.RNN(
             input_size=embedding_dim,
             hidden_size=rnn_units,
@@ -19,25 +30,29 @@ class RNNForHallucinationDetection(nn.Module):
             dropout=recurrent_dropout_rate
         )
 
-        self.fc = nn.Linear(2 * rnn_units, 1)
-        self.max_sequence_length = max_sequence_length
+        self.fc = nn.Linear(2 * rnn_units, num_classes)
         self.pad_token_id = pad_token_id
+        self.max_sequence_length = max_sequence_length
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
-        x = self.embedding(X)
+        # X: (batch_size, seq_len)
+        x = self.embedding(X) # (batch, seq, emb)
         x = self.dropout(x)
-        output, _ = self.rnn(x)
 
-        lengths = (X != self.pad_token_id).sum(dim=1)
-        lengths = torch.clamp(lengths, min=1)
+        output, _ = self.rnn(x) # (batch, seq, 2 * rnn_units)
 
-        last_output= output[torch.arange(output.size(0)), lengths - 1, :]
+        mask = (X != self.pad_token_id).unsqueeze(-1) # (batch, seq, 1)
+        
+        masked_output = output * mask.float()
+        sum_output = masked_output.sum(dim=1)
+        lengths = mask.sum(dim=1).clamp(min=1)
+        mean_output = sum_output / lengths
 
-        logits = self.fc(last_output)
+        logits = self.fc(mean_output) # (batch, num_classes)
         return logits
 
 
-class CNNForHallucinationDetection(nn.Module):
+class CNNForCategoryClassification(nn.Module):
     def __init__(self, vocab_size: int, embedding_dim: int, num_filters: int, kernel_size: int, dropout_rate: float,
                  max_sequence_length: int, pad_token_id: int = 0, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -63,7 +78,7 @@ class CNNForHallucinationDetection(nn.Module):
         return logits
 
 
-class LSTMForHallucinationDetection(nn.Module):
+class LSTMForCategoryClassification(nn.Module):
     def __init__(self, vocab_size: int, embedding_dim: int, lstm_units: int, dropout_rate: float,
                  recurrent_dropout_rate: float, max_sequence_length: int, pad_token_id: int = 0, *args, **kwargs):
         nn.Module.__init__(self)
@@ -95,7 +110,7 @@ class LSTMForHallucinationDetection(nn.Module):
         return logits
 
 
-class GloveCNNForHallucinationDetection(nn.Module):
+class GloveCNNForCategoryClassification(nn.Module):
     def __init__(self, glove_matrix: np.ndarray, num_filters: int, kernel_size: int):
         nn.Module.__init__(self)
         vocab_size, embedding_dim = glove_matrix.shape
@@ -118,7 +133,7 @@ class GloveCNNForHallucinationDetection(nn.Module):
         return logits
 
 
-class BertForHallucinationDetection(nn.Module):
+class BertForCategoryClassification(nn.Module):
     def __init__(self, model_name: str, freeze_bert: bool, dropout_rate: float = 0.5,
                  pad_token_id: int = 0, *args, **kwargs):
         nn.Module.__init__(self)

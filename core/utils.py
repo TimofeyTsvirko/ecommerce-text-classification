@@ -22,9 +22,15 @@ def init_random_seed(seed: int):
 
 
 def free_memory():
+    import gc
     gc.collect()
-    torch.cuda.empty_cache()
-    torch.mps.empty_cache()
+    
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+    
+    if hasattr(torch, 'mps') and torch.backends.mps.is_available():
+        torch.mps.empty_cache()
 
 
 def divide_data(data: pd.DataFrame, target: str) -> tuple[pd.DataFrame, pd.Series]:
@@ -72,3 +78,10 @@ def build_submission_dataframe(test_data: pd.DataFrame, id_column: str,
     result[id_column] = test_data[id_column]
     result[target_column] = predictions
     return result
+
+category_codes = {
+    "Household": 0,
+    "Books": 1,
+    "Clothing & Accessories": 2,
+    "Electronics": 3,
+}

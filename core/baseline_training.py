@@ -8,7 +8,7 @@ from typing import Any, Optional, Union, Callable
 
 from sklearn import clone
 from sklearn.base import BaseEstimator
-from sklearn.metrics import make_scorer, precision_score, recall_score, f1_score, confusion_matrix, roc_curve, \
+from sklearn.metrics import accuracy_score, make_scorer, precision_score, recall_score, f1_score, confusion_matrix, roc_curve, \
     roc_auc_score
 from sklearn.model_selection import cross_validate
 from sklearn.pipeline import Pipeline
@@ -274,33 +274,75 @@ def extract_feature_names_from_transformer(transformer: Any, step_name: str) -> 
 
 
 def _calculate_classification_metrics(y_true: Any, y_pred: Any, y_probs: Optional[Any] = None) -> ClassificationMetrics:
-    roc_auc_value = roc_auc_score(y_true, y_probs) if y_probs is not None else None
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    
+    n_classes = len(np.unique(y_true))
+    
+    # ===== ROC-AUC =====
+    roc_auc_value = None
+    if y_probs is not None:
+        y_probs = np.asarray(y_probs)
+        
+        if n_classes == 2:
+            # Бинарный случай
+            if y_probs.ndim == 2:
+                y_probs_binary = y_probs[:, 1]  # вероятность положительного класса
+            else:
+                y_probs_binary = y_probs
+            roc_auc_value = roc_auc_score(y_true, y_probs_binary)
+        else:
+            # Мультикласс
+            roc_auc_value = roc_auc_score(
+                y_true, 
+                y_probs, 
+                multi_class='ovr', 
+                average='macro'
+            )
+
+    # ===== Основные метрики =====
     metrics = ClassificationMetrics(
         roc_auc=roc_auc_value,
         f1_score=f1_score(y_true, y_pred, average='macro', zero_division=0),
-        precision=precision_score(y_true, y_pred, average='macro'),
-        recall=recall_score(y_true, y_pred, average='macro'),
-        accuracy=(y_pred == y_true).mean(),
+        precision=precision_score(y_true, y_pred, average='macro', zero_division=0),
+        recall=recall_score(y_true, y_pred, average='macro', zero_division=0),
+        accuracy=accuracy_score(y_true, y_pred),
         confusion_matrix=confusion_matrix(y_true, y_pred)
     )
 
-    report_rows = [
-        ClassificationReportRow(
-            class_label='Positive',
-            precision=precision_score(y_true, y_pred, pos_label=1, zero_division=0),
-            recall=recall_score(y_true, y_pred, pos_label=1, zero_division=0)
-        ),
-        ClassificationReportRow(
-            class_label='Negative',
-            precision=precision_score(y_true, y_pred, pos_label=0, zero_division=0),
-            recall=recall_score(y_true, y_pred, pos_label=0, zero_division=0)
-        )
-    ]
-
+    if n_classes == 2:
+        report_rows = [
+            ClassificationReportRow(
+                class_label='Positive',
+                precision=precision_score(y_true, y_pred, pos_label=1, zero_division=0),
+                recall=recall_score(y_true, y_pred, pos_label=1, zero_division=0)
+            ),
+            ClassificationReportRow(
+                class_label='Negative',
+                precision=precision_score(y_true, y_pred, pos_label=0, zero_division=0),
+                recall=recall_score(y_true, y_pred, pos_label=0, zero_division=0)
+            )
+        ]
+    else:
+        report_rows = []
+        for cls in sorted(np.unique(y_true)):
+            report_rows.append(
+                ClassificationReportRow(
+                    class_label=str(cls),
+                    precision=precision_score(y_true, y_pred, labels=[cls], average='macro', zero_division=0),
+                    recall=recall_score(y_true, y_pred, labels=[cls], average='macro', zero_division=0)
+                )
+            )
+    
     metrics.classification_report = report_rows
 
-    if y_probs is not None:
-        fpr, tpr, thresholds = roc_curve(y_true, y_probs)
+    if y_probs is not None and n_classes == 2:
+        if y_probs.ndim == 2:
+            y_probs_binary = y_probs[:, 1]
+        else:
+            y_probs_binary = y_probs
+            
+        fpr, tpr, thresholds = roc_curve(y_true, y_probs_binary)
         metrics.roc_curve = RocCurveData(fpr=fpr, tpr=tpr, thresholds=thresholds)
 
     return metrics

@@ -56,9 +56,10 @@ def cross_validate_model(model: nn.Module, X: np.ndarray, y: np.ndarray, *,
     estimators = []
 
     n_samples = len(y)
+    num_classes = model.fc.out_features
+
     oof_pred = np.empty(n_samples, dtype=int)
-    oof_probs = np.empty(n_samples, dtype=float)
-    has_probs = True
+    oof_probs = np.empty((n_samples, num_classes), dtype=float)
 
     X = np.array(X)
     y = np.array(y)
@@ -68,13 +69,13 @@ def cross_validate_model(model: nn.Module, X: np.ndarray, y: np.ndarray, *,
         X_train, y_train = X[train_index], y[train_index]
         X_test, y_test = X[test_index], y[test_index]
 
-        fitted_preprocessor = clone(preprocessor)
+        fitted_preprocessor = clone(preprocessor) if preprocessor is not None else None
         if fitted_preprocessor is not None:
             X_train = fitted_preprocessor.fit_transform(X_train)
             X_test = fitted_preprocessor.transform(X_test)
 
         X_train_tensor = torch.tensor(X_train, dtype=torch.long).to(device)
-        y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+        y_train_tensor = torch.tensor(y_train, dtype=torch.long).to(device)
         X_test_tensor = torch.tensor(X_test, dtype=torch.long).to(device)
 
         train_loader = DataLoader(
@@ -92,7 +93,8 @@ def cross_validate_model(model: nn.Module, X: np.ndarray, y: np.ndarray, *,
         for epoch in tqdm(range(num_epochs), desc=f"Training fold {fold_index + 1}", leave=True):
             total_loss = 0.0
             for X_batch, y_batch in train_loader:
-                X_batch, y_batch = X_batch.to(device), y_batch.float().to(device)
+                X_batch = X_batch.to(device)
+                y_batch = y_batch.to(device)
 
                 optimizer.zero_grad()
                 logits = fold_model(X_batch)
@@ -109,16 +111,15 @@ def cross_validate_model(model: nn.Module, X: np.ndarray, y: np.ndarray, *,
 
         fold_model.eval()
         with torch.no_grad():
-            logits = fold_model(X_test_tensor)
-            y_score = torch.sigmoid(logits).cpu().numpy().flatten()
+            logits = fold_model(X_test_tensor)                      # (n_test, num_classes)
+            probs = torch.softmax(logits, dim=1).cpu().numpy()      # вероятности
+            y_pred = probs.argmax(axis=1)                           # классы
 
-        y_pred = _labels_from_score(y_score, 0.5)
-        y_probs = _positive_class_probabilities(y_score)
-
+        # Метрики фолда
         fold_metrics = evaluate_classification(
             y_true=y_test,
             y_pred=y_pred,
-            y_probs=y_probs,
+            y_probs=probs,
             model_name=f"fold_{fold_index + 1}",
             enable_plot=enable_plot
         )
@@ -135,9 +136,9 @@ def cross_validate_model(model: nn.Module, X: np.ndarray, y: np.ndarray, *,
         })
 
         oof_pred[test_index] = y_pred
-        oof_probs[test_index] = y_probs if y_probs is not None else 0.0
+        oof_probs[test_index] = probs
 
-        del X_train_tensor, y_train_tensor, X_test_tensor, train_loader, optimizer, logits, y_score
+        del X_train_tensor, y_train_tensor, X_test_tensor, train_loader, optimizer, logits
         free_memory()
 
     final_metrics = aggregate_classification_cv_metrics(
@@ -150,11 +151,11 @@ def cross_validate_model(model: nn.Module, X: np.ndarray, y: np.ndarray, *,
         name=model_name,
         y_true=y,
         y_pred=oof_pred,
-        y_probs=oof_probs if has_probs else None
+        y_probs=oof_probs
     )
 
     final_metrics.estimators = estimators
-    p.plot_classification_results(final_metrics, model_name="PyTorch CV")
+    p.plot_classification_results(final_metrics, model_name=model_name)
 
     return final_metrics
 
