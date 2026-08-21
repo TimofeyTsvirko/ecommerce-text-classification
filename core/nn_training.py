@@ -90,7 +90,8 @@ def cross_validate_model(model: nn.Module, X: np.ndarray, y: np.ndarray, *,
         fold_model.train()
         start_fit = perf_counter()
 
-        for epoch in tqdm(range(num_epochs), desc=f"Training fold {fold_index + 1}", leave=True):
+        pbar = tqdm(range(num_epochs), desc=f"Training fold {fold_index + 1}", leave=True)
+        for epoch in pbar:
             total_loss = 0.0
             for X_batch, y_batch in train_loader:
                 X_batch = X_batch.to(device)
@@ -105,15 +106,28 @@ def cross_validate_model(model: nn.Module, X: np.ndarray, y: np.ndarray, *,
                 total_loss += loss.item()
 
             avg_loss = total_loss / len(train_loader)
-            tqdm.write(f"  Epoch {epoch + 1}/{num_epochs} | Loss: {avg_loss:.4f}")
+            pbar.set_postfix(loss=f"{avg_loss:.4f}")
 
         fit_times.append(perf_counter() - start_fit)
 
         fold_model.eval()
+        all_logits = []
+
         with torch.no_grad():
-            logits = fold_model(X_test_tensor)                      # (n_test, num_classes)
-            probs = torch.softmax(logits, dim=1).cpu().numpy()      # вероятности
-            y_pred = probs.argmax(axis=1)                           # классы
+            test_loader = DataLoader(
+                TensorDataset(X_test_tensor),
+                batch_size=batch_size,
+                shuffle=False
+            )
+            
+            for (X_batch,) in test_loader:
+                X_batch = X_batch.to(device)
+                logits = fold_model(X_batch)
+                all_logits.append(logits.cpu())
+
+        logits = torch.cat(all_logits, dim=0)
+        probs = torch.softmax(logits, dim=1).numpy()
+        y_pred = probs.argmax(axis=1)
 
         # Метрики фолда
         fold_metrics = evaluate_classification(

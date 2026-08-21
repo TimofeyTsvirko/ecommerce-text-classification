@@ -189,28 +189,66 @@ def plot_feature_importance_cv(pipeline: Any, model_name: str,
 
 
 def plot_classification_results(metrics: ClassificationMetrics, model_name: str = "Model") -> None:
-    plt.figure(figsize=(15, 6))
+    n_classes = metrics.confusion_matrix.shape[0] if metrics.confusion_matrix is not None else 2
 
-    if metrics.confusion_matrix is not None:
-        plt.subplot(1, 2, 1)
-        sns.heatmap(metrics.confusion_matrix, annot=True, fmt='d', cmap='Blues',
-                    xticklabels=['Predicted Negative', 'Predicted Positive'],
-                    yticklabels=['Actual Negative', 'Actual Positive'])
-        plt.title(f'{model_name} - Confusion Matrix', fontsize=14)
-        plt.xlabel('Predicted Label', fontsize=12)
-        plt.ylabel('True Label', fontsize=12)
+    has_cm = metrics.confusion_matrix is not None
+    has_roc = metrics.roc_curve is not None and metrics.roc_auc is not None and n_classes == 2
 
-    if metrics.roc_curve is not None and metrics.roc_auc is not None:
-        plt.subplot(1, 2, 2)
-        plt.plot(metrics.roc_curve.fpr, metrics.roc_curve.tpr, color='darkorange', lw=2,
-                 label=f'ROC curve (AUC = {metrics.roc_auc:.2f})')
-        plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
-        plt.xlim([0.0, 1.0])
-        plt.ylim([0.0, 1.05])
-        plt.xlabel('False Positive Rate', fontsize=12)
-        plt.ylabel('True Positive Rate', fontsize=12)
-        plt.title('Receiver Operating Characteristic', fontsize=14)
-        plt.legend(loc="lower right")
+    n_plots = sum([has_cm, has_roc])
+    if n_plots == 0:
+        return
+
+    fig, axes = plt.subplots(1, n_plots, figsize=(7 * n_plots, 6))
+    if n_plots == 1:
+        axes = [axes]
+
+    plot_idx = 0
+
+    if has_cm:
+        ax = axes[plot_idx]
+        plot_idx += 1
+
+        cm = metrics.confusion_matrix
+        
+        if n_classes == 2:
+            xticklabels = ['Predicted 0', 'Predicted 1']
+            yticklabels = ['Actual 0', 'Actual 1']
+        else:
+            class_names = [str(i) for i in range(n_classes)]
+            xticklabels = [f'Pred {c}' for c in class_names]
+            yticklabels = [f'True {c}' for c in class_names]
+
+        sns.heatmap(
+            cm,
+            annot=True,
+            fmt='d',
+            cmap='Blues',
+            xticklabels=xticklabels,
+            yticklabels=yticklabels,
+            ax=ax,
+            cbar=True
+        )
+        ax.set_title(f'{model_name} — Confusion Matrix', fontsize=14)
+        ax.set_xlabel('Predicted Label', fontsize=12)
+        ax.set_ylabel('True Label', fontsize=12)
+
+    if has_roc:
+        ax = axes[plot_idx]
+        
+        ax.plot(
+            metrics.roc_curve.fpr,
+            metrics.roc_curve.tpr,
+            color='darkorange',
+            lw=2,
+            label=f'ROC curve (AUC = {metrics.roc_auc:.3f})'
+        )
+        ax.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+        ax.set_xlim([0.0, 1.0])
+        ax.set_ylim([0.0, 1.05])
+        ax.set_xlabel('False Positive Rate', fontsize=12)
+        ax.set_ylabel('True Positive Rate', fontsize=12)
+        ax.set_title('Receiver Operating Characteristic', fontsize=14)
+        ax.legend(loc="lower right")
 
     plt.tight_layout()
     plt.show()

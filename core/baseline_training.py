@@ -48,46 +48,53 @@ def aggregate_regression_cv_metrics(
 
 
 def aggregate_classification_cv_metrics(
-    *,
-    accuracy: Optional[float] = None,
-    precision: Optional[float] = None,
-    recall: Optional[float] = None,
-    f1_score_value: Optional[float] = None,
-    roc_auc: Optional[float] = None,
-    training_time: Optional[float] = None,
-    name: Optional[str] = None,
-    y_true: Optional[Union[np.ndarray, Any]] = None,
-    y_pred: Optional[Union[np.ndarray, Any]] = None,
-    y_probs: Optional[Union[np.ndarray, Any]] = None,
+    accuracy: float,
+    precision: float,
+    recall: float,
+    f1_score_value: float,
+    roc_auc: float,
+    training_time: float,
+    name: str,
+    y_true=None,
+    y_pred=None,
+    y_probs=None
 ) -> ClassificationMetrics:
     cm = None
-    roc_curve_data = None
-
     if y_true is not None and y_pred is not None:
         cm = confusion_matrix(y_true, y_pred)
 
+    roc_curve_data = None
+    
     if y_true is not None and y_probs is not None:
-        fpr, tpr, thresholds = roc_curve(y_true, y_probs)
-        roc_curve_data = RocCurveData(fpr=fpr, tpr=tpr, thresholds=thresholds)
-        if roc_auc is None:
-            try:
-                roc_auc = float(roc_auc_score(y_true, y_probs))
-            except Exception:
-                roc_auc = None
+        y_true = np.asarray(y_true)
+        y_probs = np.asarray(y_probs)
+        
+        n_classes = len(np.unique(y_true))
+        
+        if n_classes == 2:
+            if y_probs.ndim == 2:
+                y_score = y_probs[:, 1]
+            else:
+                y_score = y_probs
+                
+            fpr, tpr, thresholds = roc_curve(y_true, y_score)
+            roc_curve_data = RocCurveData(fpr=fpr, tpr=tpr, thresholds=thresholds)
+            
+            if roc_auc is None:
+                roc_auc = roc_auc_score(y_true, y_score)
 
     metrics = ClassificationMetrics(
-        roc_auc=float(roc_auc) if roc_auc is not None else None,
-        f1_score=float(f1_score_value) if f1_score_value is not None else float('nan'),
-        precision=float(precision) if precision is not None else float('nan'),
-        recall=float(recall) if recall is not None else float('nan'),
-        accuracy=float(accuracy) if accuracy is not None else float('nan'),
-        confusion_matrix=cm,
-        training_time=float(training_time) if training_time is not None else None,
+        accuracy=accuracy,
+        precision=precision,
+        recall=recall,
+        f1_score=f1_score_value,
+        roc_auc=roc_auc,
+        training_time=training_time,
         name=name,
+        confusion_matrix=cm,
+        roc_curve=roc_curve_data,
+        # добавь остальные поля, если они есть в твоём dataclass
     )
-
-    if roc_curve_data is not None:
-        metrics.roc_curve = roc_curve_data
 
     return metrics
 
