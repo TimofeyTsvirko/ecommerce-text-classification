@@ -1,8 +1,8 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from transformers import AutoModel
-
+from transformers import AutoModel, DistilBertModel, DistilBertTokenizerFast
+from sklearn.base import BaseEstimator, TransformerMixin
 
 class RNNForCategoryClassification(nn.Module):
     def __init__(
@@ -199,23 +199,67 @@ class GloveCNNForCategoryClassification(nn.Module):
         return logits
 
 
-class BertForCategoryClassification(nn.Module):
-    def __init__(self, model_name: str, freeze_bert: bool, dropout_rate: float = 0.5,
-                 pad_token_id: int = 0, *args, **kwargs):
-        nn.Module.__init__(self)
-        self.bert = AutoModel.from_pretrained(model_name)
+class DistilBertForCategoryClassification(nn.Module):
+    def __init__(
+        self,
+        model_name: str = "distilbert-base-uncased",
+        num_classes: int = 4,
+        dropout_rate: float = 0.3,
+        freeze_bert: bool = False,
+        pad_token_id: int = 0
+    ):
+        super().__init__()
+        
+        self.bert = DistilBertModel.from_pretrained(model_name)
+        self.pad_token_id = pad_token_id
+        
         if freeze_bert:
             for param in self.bert.parameters():
                 param.requires_grad = False
-
+        
+        hidden_size = self.bert.config.dim # 768
+        
         self.dropout = nn.Dropout(dropout_rate)
-        self.fc = nn.Linear(self.bert.config.hidden_size, 1)
-
-        self.pad_token_id = pad_token_id
+        self.fc = nn.Linear(hidden_size, num_classes)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
         attention_mask = (X != self.pad_token_id).long()
-        outputs = self.bert(input_ids=X, attention_mask=attention_mask)
-        cls_output = outputs.last_hidden_state[:, 0, :]
-        logits = self.fc(self.dropout(cls_output))
+        
+        outputs = self.bert(
+            input_ids=X,
+            attention_mask=attention_mask
+        )
+        
+        cls_output = outputs.last_hidden_state[:, 0, :] # [CLS]
+        cls_output = self.dropout(cls_output)
+        logits = self.fc(cls_output)
+        
         return logits
+
+
+class BertTokenizerTransformer(BaseEstimator, TransformerMixin):
+    def __init__(self, model_name="distilbert-base-uncased", max_len=128):
+        self.model_name = model_name
+        self.max_len = max_len
+        self.tokenizer = DistilBertTokenizerFast.from_pretrained(model_name)
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        if isinstance(X, np.ndarray):
+            texts = X.tolist()
+        else:
+            texts = list(X)
+        
+        texts = [str(text) for text in texts]
+
+        encodings = self.tokenizer(
+            texts,
+            max_length=self.max_len,
+            padding="max_length",
+            truncation=True,
+            return_tensors=None
+        )
+        
+        return np.array(encodings["input_ids"], dtype=np.int64)
